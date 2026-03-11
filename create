@@ -1,0 +1,319 @@
+package com.alura.literalura.model;
+
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+public record DatosAutor(
+    @JsonAlias("name") String nombre,
+    @JsonAlias("birth_year") Integer fechaNacimiento,
+    @JsonAlias("death_year") Integer fechaFallecimiento
+) {}
+
+package com.alura.literalura.model;
+
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import java.util.List;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+public record DatosLibro(
+    @JsonAlias("title") String titulo,
+    @JsonAlias("authors") List<DatosAutor> autor,
+    @JsonAlias("languages") List<String> idiomas,
+    @JsonAlias("download_count") Double numeroDeDescargas
+) {}
+
+package com.alura.literalura.model;
+
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import java.util.List;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+public record Resumen(
+    @JsonAlias("results") List<DatosLibro> resultados
+) {}
+
+package com.alura.literalura.model;
+
+import jakarta.persistence.*;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Entity
+@Table(name = "autores")
+public class Autor {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    @Column(unique = true)
+    private String nombre;
+    private Integer fechaNacimiento;
+    private Integer fechaFallecimiento;
+
+    @OneToMany(mappedBy = "autor", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+    private List<Libro> libros;
+
+    public Autor() {}
+
+    public Autor(DatosAutor datosAutor) {
+        this.nombre = datosAutor.nombre();
+        this.fechaNacimiento = datosAutor.fechaNacimiento();
+        this.fechaFallecimiento = datosAutor.fechaFallecimiento();
+    }
+
+    public Long getId() { return id; }
+    public String getNombre() { return nombre; }
+    public void setNombre(String nombre) { this.nombre = nombre; }
+    public Integer getFechaNacimiento() { return fechaNacimiento; }
+    public Integer getFechaFallecimiento() { return fechaFallecimiento; }
+    public List<Libro> getLibros() { return libros; }
+    public void setLibros(List<Libro> libros) { this.libros = libros; }
+
+    @Override
+    public String toString() {
+        String titulos = (libros != null) ? libros.stream().map(Libro::getTitulo).collect(Collectors.joining(", ")) : "";
+        return "Autor: " + nombre + "\nFecha de nacimiento: " + fechaNacimiento + "\nFecha de fallecimiento: " + fechaFallecimiento + "\nLibros: [" + titulos + "]\n";
+    }
+}
+
+package com.alura.literalura.model;
+
+import jakarta.persistence.*;
+
+@Entity
+@Table(name = "libros")
+public class Libro {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    @Column(unique = true)
+    private String titulo;
+    private String idioma;
+    private Double numeroDeDescargas;
+
+    @ManyToOne
+    private Autor autor;
+
+    public Libro() {}
+
+    public Libro(DatosLibro datosLibro) {
+        this.titulo = datosLibro.titulo();
+        this.idioma = datosLibro.idiomas().get(0);
+        this.numeroDeDescargas = datosLibro.numeroDeDescargas();
+    }
+
+    public Long getId() { return id; }
+    public String getTitulo() { return titulo; }
+    public void setTitulo(String titulo) { this.titulo = titulo; }
+    public String getIdioma() { return idioma; }
+    public void setIdioma(String idioma) { this.idioma = idioma; }
+    public Double getNumeroDeDescargas() { return numeroDeDescargas; }
+    public void setNumeroDeDescargas(Double numeroDeDescargas) { this.numeroDeDescargas = numeroDeDescargas; }
+    public Autor getAutor() { return autor; }
+    public void setAutor(Autor autor) { this.autor = autor; }
+
+    @Override
+    public String toString() {
+        return "----- LIBRO -----\nTitulo: " + titulo + "\nAutor: " + (autor != null ? autor.getNombre() : "N/A") + "\nIdioma: " + idioma + "\nNumero de descargas: " + numeroDeDescargas + "\n-----------------\n";
+    }
+}
+
+package com.alura.literalura.repository;
+
+import com.alura.literalura.model.Autor;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import java.util.List;
+import java.util.Optional;
+
+public interface AutorRepository extends JpaRepository<Autor, Long> {
+    Optional<Autor> findByNombreContainsIgnoreCase(String nombre);
+
+    @Query("SELECT a FROM Autor a WHERE a.fechaNacimiento <= :anio AND (a.fechaFallecimiento IS NULL OR a.fechaFallecimiento >= :anio)")
+    List<Autor> buscarAutoresVivosEnAnio(Integer anio);
+}
+
+package com.alura.literalura.repository;
+
+import com.alura.literalura.model.Libro;
+import org.springframework.data.jpa.repository.JpaRepository;
+import java.util.List;
+
+public interface LibroRepository extends JpaRepository<Libro, Long> {
+    List<Libro> findByIdioma(String idioma);
+}
+
+package com.alura.literalura.service;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+
+public class ConsumoAPI {
+    public String obtenerDatos(String url) {
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).build();
+        HttpResponse<String> response = null;
+        try {
+            response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        return response.body();
+    }
+}
+
+package com.alura.literalura.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+public class ConvierteDatos {
+    private ObjectMapper objectMapper = new ObjectMapper();
+
+    public <T> T obtenerDatos(String json, Class<T> clase) {
+        try {
+            return objectMapper.readValue(json, clase);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+
+package com.alura.literalura.principal;
+
+import com.alura.literalura.model.*;
+import com.alura.literalura.repository.AutorRepository;
+import com.alura.literalura.repository.LibroRepository;
+import com.alura.literalura.service.ConsumoAPI;
+import com.alura.literalura.service.ConvierteDatos;
+import java.util.List;
+import java.util.Optional;
+import java.util.Scanner;
+
+public class Principal {
+    private Scanner teclado = new Scanner(System.in);
+    private ConsumoAPI consumoApi = new ConsumoAPI();
+    private ConvierteDatos conversor = new ConvierteDatos();
+    private final String URL_BASE = "https://gutendex.com/books/?search=";
+    private LibroRepository libroRepositorio;
+    private AutorRepository autorRepositorio;
+
+    public Principal(LibroRepository libroRepositorio, AutorRepository autorRepositorio) {
+        this.libroRepositorio = libroRepositorio;
+        this.autorRepositorio = autorRepositorio;
+    }
+
+    public void muestraElMenu() {
+        var opcion = -1;
+        while (opcion != 0) {
+            var menu = """
+                    1 - Buscar libro por titulo
+                    2 - Listar libros registrados
+                    3 - Listar autores registrados
+                    4 - Listar autores vivos en un determinado año
+                    5 - Listar libros por idioma
+                    0 - Salir
+                    """;
+            System.out.println(menu);
+            opcion = teclado.nextInt();
+            teclado.nextLine();
+
+            switch (opcion) {
+                case 1 -> buscarLibroWeb();
+                case 2 -> listarLibrosRegistrados();
+                case 3 -> listarAutoresRegistrados();
+                case 4 -> listarAutoresVivos();
+                case 5 -> listarLibrosPorIdioma();
+                case 0 -> System.out.println("Cerrando la aplicación...");
+                default -> System.out.println("Opción inválida");
+            }
+        }
+    }
+
+    private void buscarLibroWeb() {
+        System.out.println("Ingrese el nombre del libro que desea buscar:");
+        var nombreLibro = teclado.nextLine();
+        var json = consumoApi.obtenerDatos(URL_BASE + nombreLibro.replace(" ", "+"));
+        var datosBusqueda = conversor.obtenerDatos(json, Resumen.class);
+        Optional<DatosLibro> libroBuscado = datosBusqueda.resultados().stream().findFirst();
+
+        if (libroBuscado.isPresent()) {
+            DatosLibro datos = libroBuscado.get();
+            if (libroRepositorio.findById(0L).isEmpty()) { 
+                DatosAutor datosAutor = datos.autor().get(0);
+                Autor autor = autorRepositorio.findByNombreContainsIgnoreCase(datosAutor.nombre())
+                        .orElseGet(() -> autorRepositorio.save(new Autor(datosAutor)));
+
+                Libro libro = new Libro(datos);
+                libro.setAutor(autor);
+                libroRepositorio.save(libro);
+                System.out.println(libro);
+            }
+        } else {
+            System.out.println("Libro no encontrado");
+        }
+    }
+
+    private void listarLibrosRegistrados() {
+        libroRepositorio.findAll().forEach(System.out::println);
+    }
+
+    private void listarAutoresRegistrados() {
+        autorRepositorio.findAll().forEach(System.out::println);
+    }
+
+    private void listarAutoresVivos() {
+        System.out.println("Ingrese el año vivo de autor(es) que desea buscar:");
+        var anio = teclado.nextInt();
+        autorRepositorio.buscarAutoresVivosEnAnio(anio).forEach(System.out::println);
+    }
+
+    private void listarLibrosPorIdioma() {
+        System.out.println("Ingrese el idioma para buscar los libros:");
+        System.out.println("es - español");
+        System.out.println("en - inglés");
+        System.out.println("fr - francés");
+        System.out.println("pt - portugués");
+        var idioma = teclado.nextLine();
+        List<Libro> libros = libroRepositorio.findByIdioma(idioma);
+        if (libros.isEmpty()) {
+            System.out.println("No hay libros registrados en ese idioma");
+        } else {
+            libros.forEach(System.out::println);
+        }
+    }
+}
+
+package com.alura.literalura;
+
+import com.alura.literalura.principal.Principal;
+import com.alura.literalura.repository.AutorRepository;
+import com.alura.literalura.repository.LibroRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class LiteraluraApplication implements CommandLineRunner {
+
+    @Autowired
+    private LibroRepository libroRepository;
+    @Autowired
+    private AutorRepository autorRepository;
+
+    public static void main(String[] args) {
+        SpringApplication.run(LiteraluraApplication.class, args);
+    }
+
+    @Override
+    public void run(String... args) throws Exception {
+        Principal principal = new Principal(libroRepository, autorRepository);
+        principal.muestraElMenu();
+    }
+}
